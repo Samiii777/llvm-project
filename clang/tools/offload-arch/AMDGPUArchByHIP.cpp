@@ -87,8 +87,24 @@ static std::vector<std::string> getSearchPaths() {
 
   // Get the directory of the current executable
   if (auto MainExe = sys::fs::getMainExecutable(nullptr, nullptr);
-      !MainExe.empty())
-    Paths.push_back(sys::path::parent_path(MainExe).str());
+      !MainExe.empty()) {
+    StringRef ExeDir = sys::path::parent_path(MainExe);
+    Paths.push_back(ExeDir.str());
+    // Walk up to MaxParentDepth parent directories, appending "bin" to
+    // each, so install layouts like <root>/lib/llvm/bin/offload-arch
+    // can discover <root>/bin/amdhip64_*.dll (depth 3 covers that).
+    constexpr int MaxParentDepth = 3;
+    StringRef Parent = sys::path::parent_path(ExeDir);
+    for (int I = 0; I < MaxParentDepth && !Parent.empty(); ++I) {
+      SmallString<256> Candidate(Parent);
+      sys::path::append(Candidate, "bin");
+      std::string CandStr = sys::path::convert_to_slash(Candidate);
+      // Avoid duplicating ExeDir itself (e.g. exe already in a bin/).
+      if (CandStr != Paths.front())
+        Paths.push_back(CandStr);
+      Parent = sys::path::parent_path(Parent);
+    }
+  }
 
   // Get the system directory
   wchar_t SystemDirectory[MAX_PATH];
@@ -181,7 +197,10 @@ static std::pair<std::string, bool> findNewestHIPDLL() {
   if (DLLNames.empty())
     return {"amdhip64.dll", true};
 
-  llvm::sort(DLLNames, compareVersions);
+  // stable_sort preserves the insertion order from getSearchPaths() on
+  // version ties, so a colocated build DLL wins over a system copy.
+  // compareVersions returns true when A's version > B's (descending).
+  llvm::stable_sort(DLLNames, compareVersions);
   return {DLLNames[0], false};
 #else
   // On Linux, fallback to default shared object
@@ -200,6 +219,34 @@ int printGPUsByHIP() {
   }
 
   std::string ErrMsg;
+#ifdef _WIN32
+  // Prime the DLL so its transitive deps (e.g. rocm_kpack.dll) resolve
+  // from its own directory.  LLVM's DynamicLibrary uses LoadLibraryW,
+  // which does not search the DLL's directory for imports.  The priming
+  // load pins the module with the right search semantics; the subsequent
+  // getPermanentLibrary call reuses it (Windows ref-counts LoadLibrary).
+  // The handle is intentionally not freed — offload-arch is short-lived,
+  // and the module must stay pinned for getPermanentLibrary to reuse it.
+  if (!IsFallback) {
+    // !IsFallback guarantees DynamicHIPPath is an absolute path (the
+    // fallback case is a bare "amdhip64.dll" which would not work with
+    // LOAD_WITH_ALTERED_SEARCH_PATH).
+    // DynamicHIPPath is UTF-8 (from LLVM sys::path / sys::fs APIs).
+    int WLen = MultiByteToWideChar(CP_UTF8, 0, DynamicHIPPath.c_str(),
+                                   -1, nullptr, 0);
+    if (WLen > 0) {
+      std::vector<wchar_t> WPath(WLen);
+      if (MultiByteToWideChar(CP_UTF8, 0, DynamicHIPPath.c_str(), -1,
+                              WPath.data(), WLen) > 0) {
+        HMODULE H = LoadLibraryExW(WPath.data(), nullptr,
+                                   LOAD_WITH_ALTERED_SEARCH_PATH);
+        if (!H && Verbose)
+          errs() << "Note: priming LoadLibraryExW failed for "
+                 << DynamicHIPPath << "\n";
+      }
+    }
+  }
+#endif
   auto DynlibHandle = std::make_unique<llvm::sys::DynamicLibrary>(
       llvm::sys::DynamicLibrary::getPermanentLibrary(DynamicHIPPath.c_str(),
                                                      &ErrMsg));
