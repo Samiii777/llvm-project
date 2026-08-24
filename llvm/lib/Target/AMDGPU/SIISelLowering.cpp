@@ -19806,8 +19806,12 @@ SITargetLowering::getRegForInlineAsmConstraint(const TargetRegisterInfo *TRI_,
       case 1:
         return std::pair(0U, nullptr);
       case 16:
-        RC = Subtarget->useRealTrue16Insts() ? &AMDGPU::VGPR_16RegClass
-                                             : &AMDGPU::VGPR_32_Lo256RegClass;
+        // The "v" constraint denotes a full 32-bit VGPR. Binding a 16-bit
+        // value to a VGPR_16 in true16 mode would print it as a half register
+        // (v0.l), which only true16 opcodes accept, silently invalidating
+        // pre-existing asm written with 32-bit opcodes. A specific half can
+        // still be requested explicitly with "{v0.l}"/"{v0.h}".
+        RC = &AMDGPU::VGPR_32_Lo256RegClass;
         break;
       default:
         RC = Subtarget->has1024AddressableVGPRs()

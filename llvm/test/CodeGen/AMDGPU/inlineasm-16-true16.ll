@@ -36,10 +36,10 @@ define amdgpu_kernel void @v_input_output_f16() #0 {
 ; GFX11-LABEL: v_input_output_f16:
 ; GFX11:       ; %bb.0:
 ; GFX11-NEXT:    ;;#ASMSTART
-; GFX11-NEXT:    v_mov_b16 v0.l, -1
+; GFX11-NEXT:    v_mov_b16 v0, -1
 ; GFX11-NEXT:    ;;#ASMEND
 ; GFX11-NEXT:    ;;#ASMSTART
-; GFX11-NEXT:    ; use v0.l
+; GFX11-NEXT:    ; use v0
 ; GFX11-NEXT:    ;;#ASMEND
 ; GFX11-NEXT:    s_endpgm
   %v = tail call half asm sideeffect "v_mov_b16 $0, -1", "=v"() #0
@@ -51,10 +51,11 @@ define amdgpu_kernel void @v_input_output_i16() #0 {
 ; GFX11-LABEL: v_input_output_i16:
 ; GFX11:       ; %bb.0:
 ; GFX11-NEXT:    ;;#ASMSTART
-; GFX11-NEXT:    v_mov_b16 v0.l, -1
+; GFX11-NEXT:    v_mov_b16 v0, -1
 ; GFX11-NEXT:    ;;#ASMEND
+; GFX11-NEXT:    v_and_b32_e32 v0, 0xffff, v0
 ; GFX11-NEXT:    ;;#ASMSTART
-; GFX11-NEXT:    ; use v0.l
+; GFX11-NEXT:    ; use v0
 ; GFX11-NEXT:    ;;#ASMEND
 ; GFX11-NEXT:    s_endpgm
   %v = tail call i16 asm sideeffect "v_mov_b16 $0, -1", "=v"() #0
